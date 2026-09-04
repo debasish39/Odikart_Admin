@@ -54,10 +54,10 @@ function App() {
   <Route path="sellers/approved" element={<ApprovedSellers />} />
   <Route path="sellers/rejected" element={<RejectedSellers />} />
   <Route path="sellers/:id" element={<SellerDetails />} />
-  <Route path="finance" element={<Finance />} />
+  {/* <Route path="finance" element={<Finance />} />
 <Route path="finance/wallets" element={<Wallets />} />
 <Route path="finance/transactions" element={<Transactions />} />
-<Route path="finance/withdrawals" element={<Withdrawals />} />
+<Route path="finance/withdrawals" element={<Withdrawals />} /> */}
 </Route>
         {/* =========================
             DEFAULT
