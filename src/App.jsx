@@ -21,10 +21,10 @@ import Orders from "./pages/dashboard/Orders";
 import Couriers from "./pages/couriers/Couriers";
 import Coupons from "./pages/dashboard/Coupons";
 import Categories from "./pages/dashboard/Categories";
-import Finance from "./pages/finance/Finance";
-import Wallets from "./pages/finance/Wallets";
-import Transactions from "./pages/finance/Transactions";
-import Withdrawals from "./pages/finance/Withdrawals";
+// import Finance from "./pages/finance/Finance";
+// import Wallets from "./pages/finance/Wallets";
+// import Transactions from "./pages/finance/Transactions";
+// import Withdrawals from "./pages/finance/Withdrawals";
 function App() {
   return (
     <BrowserRouter>
@@ -37,7 +37,6 @@ function App() {
           path="/admin/login"
           element={<AdminLogin />}
         />
-
         {/* =========================
             PROTECTED ADMIN ROUTES
         ========================= */}
