@@ -882,6 +882,7 @@ const ProductDetail = ({
   onApprove,
   onReject,
   onBlock,
+  onUnblock,
   onEdit,
   actionLoading,
 }) => {
@@ -1653,77 +1654,148 @@ const ProductDetail = ({
 
         {/* ACTION BAR */}
 
-        <footer className="shrink-0 border-t border-neutral-200 bg-white p-3 sm:p-4">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 sm:flex-row sm:justify-end">
-            {product.status === "pending" && (
-              <>
-                <button
-                  type="button"
-                  disabled={
-                    actionLoading ===
-                    product._id
-                  }
-                  onClick={() =>
-                    onReject(product)
-                  }
-                  className="flex h-11 items-center justify-center gap-2 rounded-xl border border-black px-5 text-sm font-bold transition hover:bg-black hover:text-white disabled:opacity-40"
-                >
-                  <XCircle size={16} />
-                  Reject
-                </button>
+      {/* ACTION BAR */}
 
-                <button
-                  type="button"
-                  disabled={
-                    actionLoading ===
-                    product._id
-                  }
-                  onClick={() =>
-                    onApprove(product)
-                  }
-                  className="flex h-11 items-center justify-center gap-2 rounded-xl bg-black px-5 text-sm font-bold text-white transition hover:bg-neutral-800 disabled:opacity-40"
-                >
-                  <CheckCircle2 size={16} />
-                  Approve
-                </button>
-              </>
-            )}
+<footer className="shrink-0 border-t border-neutral-200 bg-white p-3 sm:p-4">
 
-            {product.status === "approved" && (
-              <button
-                type="button"
-                disabled={
-                  actionLoading ===
-                  product._id
-                }
-                onClick={() =>
-                  onBlock(product)
-                }
-                className="flex h-11 items-center justify-center gap-2 rounded-xl border border-black px-5 text-sm font-bold transition hover:bg-black hover:text-white disabled:opacity-40"
-              >
-                <Ban size={16} />
-                Block Product
-              </button>
-            )}
+  <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 sm:flex-row sm:justify-end">
 
-            <button
-              type="button"
-              onClick={() => onEdit(product)}
-              className="flex h-11 items-center justify-center gap-2 rounded-xl border border-black px-5 text-sm font-bold transition hover:bg-black hover:text-white"
-            >
-              <Pencil size={16} />
-              Edit
-            </button>
+    {/* =====================================
+        PENDING
+    ===================================== */}
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-11 items-center justify-center rounded-xl bg-black px-5 text-sm font-bold text-white transition hover:bg-neutral-800"
-            >
-              Close
-            </button>
-          </div>
-        </footer>
+    {product.status === "pending" && (
+      <>
+
+        <button
+          type="button"
+          disabled={
+            actionLoading === product._id
+          }
+          onClick={() =>
+            onReject(product)
+          }
+          className="flex h-11 items-center justify-center gap-2 rounded-xl border border-black px-5 text-sm font-bold transition hover:bg-black hover:text-white disabled:opacity-40"
+        >
+
+          <XCircle size={16} />
+
+          Reject
+
+        </button>
+
+
+        <button
+          type="button"
+          disabled={
+            actionLoading === product._id
+          }
+          onClick={() =>
+            onApprove(product)
+          }
+          className="flex h-11 items-center justify-center gap-2 rounded-xl bg-black px-5 text-sm font-bold text-white transition hover:bg-neutral-800 disabled:opacity-40"
+        >
+
+          <CheckCircle2 size={16} />
+
+          Approve
+
+        </button>
+
+      </>
+    )}
+
+
+    {/* =====================================
+        APPROVED
+    ===================================== */}
+
+    {product.status === "approved" && (
+
+      <button
+        type="button"
+        disabled={
+          actionLoading === product._id
+        }
+        onClick={() =>
+          onBlock(product)
+        }
+        className="flex h-11 items-center justify-center gap-2 rounded-xl border border-black px-5 text-sm font-bold transition hover:bg-black hover:text-white disabled:opacity-40"
+      >
+
+        <Ban size={16} />
+
+        Block Product
+
+      </button>
+
+    )}
+
+
+    {/* =====================================
+        BLOCKED
+    ===================================== */}
+
+    {product.status === "blocked" && (
+
+      <button
+        type="button"
+        disabled={
+          actionLoading === product._id
+        }
+        onClick={() =>
+          onUnblock(product)
+        }
+        className="flex h-11 items-center justify-center gap-2 rounded-xl bg-black px-5 text-sm font-bold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+
+        <CheckCircle2 size={16} />
+
+        {actionLoading === product._id
+          ? "Unblocking..."
+          : "Unblock Product"}
+
+      </button>
+
+    )}
+
+
+    {/* =====================================
+        EDIT
+    ===================================== */}
+
+    <button
+      type="button"
+      onClick={() =>
+        onEdit(product)
+      }
+      className="flex h-11 items-center justify-center gap-2 rounded-xl border border-black px-5 text-sm font-bold transition hover:bg-black hover:text-white"
+    >
+
+      <Pencil size={16} />
+
+      Edit
+
+    </button>
+
+
+    {/* =====================================
+        CLOSE
+    ===================================== */}
+
+    <button
+      type="button"
+      onClick={onClose}
+      className="flex h-11 items-center justify-center rounded-xl bg-black px-5 text-sm font-bold text-white transition hover:bg-neutral-800"
+    >
+
+      Close
+
+    </button>
+
+  </div>
+
+</footer>
       </div>
     </div>
   );
@@ -3399,7 +3471,50 @@ const Products = () => {
       setActionLoading(null);
     }
   };
+/* =======================================================
+   UNBLOCK PRODUCT
+======================================================= */
 
+const handleUnblock = async (product) => {
+
+  if (!product?._id) {
+    return;
+  }
+
+  try {
+
+    setActionLoading(product._id);
+
+    await adminApi.put(
+      `/products/admin/${product._id}/unblock`
+    );
+
+    toast.success(
+      "Product unblocked successfully"
+    );
+
+    setSelectedProduct(null);
+
+    await fetchProducts();
+
+  } catch (error) {
+
+    console.error(
+      "Unblock product error:",
+      error
+    );
+
+    toast.error(
+      error.response?.data?.message ||
+      "Failed to unblock product"
+    );
+
+  } finally {
+
+    setActionLoading(null);
+
+  }
+};
   /* =======================================================
      OPEN REASON MODAL
   ======================================================= */
@@ -4447,33 +4562,43 @@ const Products = () => {
           PRODUCT DETAIL
       ===================================================== */}
 
-      <ProductDetail
-        product={
-          selectedProduct
-        }
-        onClose={() =>
-          setSelectedProduct(null)
-        }
-        onApprove={
-          handleApprove
-        }
-        onReject={(product) =>
-          openReasonModal(
-            product,
-            "reject"
-          )
-        }
-        onBlock={(product) =>
-          openReasonModal(
-            product,
-            "block"
-          )
-        }
-        onEdit={openEditProduct}
-        actionLoading={
-          actionLoading
-        }
-      />
+     <ProductDetail
+  product={selectedProduct}
+
+  onClose={() =>
+    setSelectedProduct(null)
+  }
+
+  onApprove={
+    handleApprove
+  }
+
+  onReject={(product) =>
+    openReasonModal(
+      product,
+      "reject"
+    )
+  }
+
+  onBlock={(product) =>
+    openReasonModal(
+      product,
+      "block"
+    )
+  }
+
+  onUnblock={
+    handleUnblock
+  }
+
+  onEdit={
+    openEditProduct
+  }
+
+  actionLoading={
+    actionLoading
+  }
+/>
 
       {/* =====================================================
           REASON MODAL
