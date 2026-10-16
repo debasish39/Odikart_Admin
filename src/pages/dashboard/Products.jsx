@@ -2118,13 +2118,43 @@ const ProductEditor = ({
       [group]: { ...current[group], [key]: value },
     }));
 
+  // The regular/original price is the source of truth. When no offer is
+  // active, keep both stored price fields in sync so an old value cannot win.
   const updateVariant = (index, key, value) => {
     setForm((current) => ({
       ...current,
-      variants: current.variants.map((variant, i) =>
-        i === index ? { ...variant, [key]: value } : variant
-      ),
+      variants: current.variants.map((variant, i) => {
+        if (i !== index) return variant;
+
+        if (key === "originalPrice") {
+          return {
+            ...variant,
+            originalPrice: value,
+            price: current.offer?.enabled ? variant.price : value,
+          };
+        }
+
+        // Keep other fields editable without letting the derived selling price
+        // accidentally replace the regular price.
+        return { ...variant, [key]: value };
+      }),
     }));
+  };
+
+  const getCalculatedSellingPrice = (variant) => {
+    const basePrice = Number(variant?.originalPrice ?? variant?.price ?? 0);
+    if (!Number.isFinite(basePrice) || basePrice < 0) return 0;
+    if (!form.offer?.enabled) return basePrice;
+
+    const discountValue = Number(form.offer.value || 0);
+    if (!Number.isFinite(discountValue) || discountValue <= 0) return basePrice;
+
+    if (form.offer.discountType === "fixed") {
+      return Math.round(Math.max(0, basePrice - discountValue));
+    }
+
+    if (discountValue > 100) return basePrice;
+    return Math.round(Math.max(0, basePrice * (1 - discountValue / 100)));
   };
 
   const updateAttribute = (index, key, value) => {
@@ -2456,7 +2486,11 @@ const ProductEditor = ({
                           />
                         </Field>
 
-                        <Field label="Original Price" required>
+                        <Field
+                          label="Regular Price"
+                          required
+                          hint="Edit this price for normal product price changes."
+                        >
                           <input
                             required
                             type="number"
@@ -2470,17 +2504,20 @@ const ProductEditor = ({
                           />
                         </Field>
 
-                        <Field label="Selling Price" required hint="Backend recalculates this from offer.">
+                        <Field
+                          label="Selling Price"
+                          required
+                          hint={form.offer.enabled ? "Automatically calculated from the offer." : "Matches the regular price when no offer is active."}
+                        >
                           <input
                             required
                             type="number"
                             min="0"
                             step="1"
-                            value={variant.price}
-                            onChange={(e) =>
-                              updateVariant(index, "price", e.target.value)
-                            }
-                            className={inputClass}
+                            value={getCalculatedSellingPrice(variant)}
+                            readOnly
+                            aria-readonly="true"
+                            className={`${inputClass} cursor-not-allowed bg-neutral-100 text-neutral-600`}
                           />
                         </Field>
 
