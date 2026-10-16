@@ -3581,24 +3581,45 @@ const handleUnblock = async (product) => {
           endpoint = `/products/admin/${product._id}/block`;
         }
 
-        await adminApi.put(
+        const response = await adminApi.put(
           endpoint,
           {
-            reason:
-              reason.trim(),
+            reason: reason.trim(),
           }
         );
 
+        const isReject = reasonModal.type === "reject";
+
         toast.success(
-          reasonModal.type ===
-            "reject"
+          isReject
             ? "Product rejected successfully"
             : "Product blocked successfully"
         );
 
         closeReasonModal();
 
-        setSelectedProduct(null);
+        if (isReject) {
+          // Rejected products keep the existing behavior: close the details drawer.
+          setSelectedProduct(null);
+        } else {
+          // Keep the details drawer open and immediately reflect the blocked status.
+          // Preserve populated seller/category data already used by the drawer.
+          setSelectedProduct((current) => {
+            if (!current || String(current._id) !== String(product._id)) {
+              return current;
+            }
+
+            return {
+              ...current,
+              status: response.data?.product?.status || "blocked",
+              isActive: response.data?.product?.isActive ?? false,
+              rejectionReason:
+                response.data?.product?.rejectionReason || reason.trim(),
+              approvalHistory:
+                response.data?.product?.approvalHistory || current.approvalHistory,
+            };
+          });
+        }
 
         await fetchProducts();
       } catch (error) {
