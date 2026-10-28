@@ -21,6 +21,7 @@ import Orders from "./pages/dashboard/Orders";
 import Couriers from "./pages/couriers/Couriers";
 import Coupons from "./pages/dashboard/Coupons";
 import Categories from "./pages/dashboard/Categories";
+import AdminNotifications from "./pages/notifications/AdminNotifications";
 // import Finance from "./pages/finance/Finance";
 // import Wallets from "./pages/finance/Wallets";
 // import Transactions from "./pages/finance/Transactions";
@@ -46,7 +47,10 @@ function App() {
   <Route path="orders" element={<Orders />} />
   <Route path="couriers" element={<Couriers />} />
   <Route path="users" element={<Users />} />
-
+<Route
+  path="notifications"
+  element={<AdminNotifications />}
+/>
   <Route path="categories" element={<Categories />} />
   <Route path="coupons" element={<Coupons />} />
 
