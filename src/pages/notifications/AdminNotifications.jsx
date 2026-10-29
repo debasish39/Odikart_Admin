@@ -24,6 +24,7 @@ import {
   deleteAdminNotification,
   sendNotificationToUser,
   sendPromotionToAllCustomers,
+  uploadNotificationImage,
 } from "../../services/notificationApi";
 
 const TYPES = [
@@ -82,6 +83,7 @@ export default function AdminNotifications() {
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (quiet) setRefreshing(true);
@@ -156,6 +158,59 @@ export default function AdminNotifications() {
     setSelected(null);
     setForm(emptyForm);
     setError("");
+  };
+
+  const handlePromotionImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please choose an image file.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError("Choose an image smaller than 8 MB.");
+      return;
+    }
+
+    setError("");
+    setNotice("");
+    setUploadingImage(true);
+    try {
+      const response = await uploadNotificationImage(file);
+      const data = response?.data ?? response;
+      const uploadedUrl =
+        data?.imageUrl || data?.secure_url || data?.url || data?.data?.imageUrl;
+
+      let parsedImageUrl;
+      try {
+        parsedImageUrl = new URL(uploadedUrl);
+      } catch {
+        throw new Error("The upload API did not return a valid image URL.");
+      }
+
+      if (parsedImageUrl.protocol !== "https:") {
+        throw new Error("The uploaded image must use HTTPS.");
+      }
+
+      setForm((current) => ({ ...current, imageUrl: parsedImageUrl.href }));
+      setNotice("Image uploaded successfully. You can now send the promotion.");
+    } catch (err) {
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Image upload failed. Check the image-upload API and try again."
+      );
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const removePromotionImage = () => {
+    setForm((current) => ({ ...current, imageUrl: "" }));
+    setError("");
+    setNotice("");
   };
 
   const submit = async (event) => {
@@ -313,6 +368,24 @@ export default function AdminNotifications() {
                     {item.isPromotional && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-800">Promotional</span>}
                   </div>
                   <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{item.message || "No message"}</p>
+                  {item.imageUrl && (
+                    <a
+                      href={item.imageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 inline-flex max-w-xs overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                    >
+                      <img
+                        src={item.imageUrl}
+                        alt={`${item.title || "Notification"} image`}
+                        loading="lazy"
+                        className="max-h-28 w-full object-contain"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    </a>
+                  )}
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
                     <span>{formatDate(item.createdAt)}</span>
                     <span className="inline-flex items-center gap-1"><UserRound size={13} /> User: {String(item.userId?._id || item.userId || "—")}</span>
@@ -351,26 +424,40 @@ export default function AdminNotifications() {
               <Field label="Link (optional)" hint="A relative path like /orders or a full URL."><input value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="/orders" className={inputClass} /></Field>
               {modal === "broadcast" && (
                 <div>
-                  <Field label="Promotion image URL (optional)" hint="Paste a direct image URL from Cloudinary or another image host. No camera/gallery upload needed.">
+                  <Field
+                    label="Promotion image (optional)"
+                    hint="Choose an image from your device. It uploads automatically; no URL needs to be pasted."
+                  >
                     <input
-                      type="url"
-                      value={form.imageUrl}
-                      onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-                      placeholder="https://res.cloudinary.com/your-cloud/image/upload/offer.jpg"
-                      className={inputClass}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handlePromotionImageChange}
+                      disabled={uploadingImage || saving}
+                      className={`${inputClass} file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-semibold`}
                     />
                   </Field>
+
                   {form.imageUrl.trim() && (
                     <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-2">
-                      <p className="mb-2 text-xs font-medium text-slate-500">Image preview</p>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-slate-600">Image preview</p>
+                        <button
+                          type="button"
+                          onClick={removePromotionImage}
+                          className="text-xs font-semibold text-slate-600 underline"
+                        >
+                          Remove image
+                        </button>
+                      </div>
                       <img
                         src={form.imageUrl.trim()}
                         alt="Promotion preview"
-                        onError={(e) => { e.currentTarget.style.display = "none"; }}
-                        onLoad={(e) => { e.currentTarget.style.display = "block"; }}
-                        className="max-h-48 w-full rounded-lg object-contain"
+                        className="max-h-56 w-full rounded-lg object-contain"
                       />
                     </div>
+                  )}
+                  {uploadingImage && (
+                    <p className="mt-2 text-sm text-slate-500">Uploading image securely…</p>
                   )}
                 </div>
               )}
@@ -378,7 +465,7 @@ export default function AdminNotifications() {
               {modal === "broadcast" && <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-800">Customers' promotional preferences should be respected by the backend. Check the response for processed, skipped, and failed counts.</div>}
               <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
                 <button type="button" onClick={closeModal} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
-                <button type="submit" disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">{saving && <LoaderCircle size={16} className="animate-spin" />}{saving ? "Saving…" : modal === "edit" ? "Save changes" : modal === "broadcast" ? "Send promotion" : modal === "create" ? "Create notification" : "Send notification"}</button>
+                <button type="submit" disabled={saving || uploadingImage} className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">{saving && <LoaderCircle size={16} className="animate-spin" />}{uploadingImage ? "Uploading image…" : saving ? "Saving…" : modal === "edit" ? "Save changes" : modal === "broadcast" ? "Send promotion" : modal === "create" ? "Create notification" : "Send notification"}</button>
               </div>
             </form>
           </section>
