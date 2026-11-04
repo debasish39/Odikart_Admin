@@ -16,6 +16,7 @@ import {
   ReceiptText,
   ArrowDownToLine,
   Percent,
+  Images,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -71,6 +72,11 @@ const growthItems = [
     name: "Coupons",
     path: "/admin/coupons",
     icon: TicketPercent,
+  },
+  {
+    name: "Banners",
+    path: "/admin/banners",
+    icon: Images,
   },
 ];
 

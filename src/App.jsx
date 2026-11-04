@@ -16,6 +16,7 @@ import ApprovedSellers from "./pages/dashboard/ApprovedSellers";
 import RejectedSellers from "./pages/dashboard/RejectedSellers";
 import Products from "./pages/dashboard/Products";
 import SellerDetails from "./pages/dashboard/SellerDetails";
+import Banners from "./pages/dashboard/Banners";
 import Users from "./pages/dashboard/Users";
 import Orders from "./pages/dashboard/Orders";
 import Couriers from "./pages/couriers/Couriers";
@@ -44,7 +45,8 @@ function App() {
       <Route path="/admin" element={<AdminLayout />}>
   <Route index element={<Dashboard />} />
   <Route path="products" element={<Products />} />
-  <Route path="orders" element={<Orders />} />
+  <Route path="banners" element={<Banners />} />
+    <Route path="orders" element={<Orders />} />
   <Route path="couriers" element={<Couriers />} />
   <Route path="users" element={<Users />} />
 <Route
