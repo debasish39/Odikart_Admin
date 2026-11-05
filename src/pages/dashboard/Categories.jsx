@@ -33,6 +33,118 @@ import {
   deleteCategory,
 } from "../../services/categoryApi";
 
+async function uploadCategoryImage(file) {
+  const debug = (...args) => console.info("[OdiKart Cloudinary Upload]", ...args);
+
+  if (!file) {
+    debug("No file selected; skipping upload.");
+    return "";
+  }
+
+  debug("Starting category image upload", {
+    fileName: file.name,
+    fileType: file.type,
+    fileSizeBytes: file.size,
+    fileSizeMB: Number((file.size / (1024 * 1024)).toFixed(2)),
+  });
+
+  if (!file.type.startsWith("image/")) {
+    throw new Error(`Invalid file type: ${file.type || "unknown"}. Please select an image.`);
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error(`Image is ${(file.size / (1024 * 1024)).toFixed(2)} MB. Maximum allowed size is 5 MB.`);
+  }
+
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME?.trim();
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET?.trim();
+
+  // Log presence only; never print credentials or file contents.
+  debug("Environment configuration check", {
+    cloudNamePresent: Boolean(cloudName),
+    uploadPresetPresent: Boolean(uploadPreset),
+    cloudNameLength: cloudName?.length || 0,
+    uploadPresetLength: uploadPreset?.length || 0,
+    mode: import.meta.env.MODE,
+  });
+
+  if (!cloudName || !uploadPreset) {
+    throw new Error(
+      `Cloudinary configuration missing: ${[
+        !cloudName && "VITE_CLOUDINARY_CLOUD_NAME",
+        !uploadPreset && "VITE_CLOUDINARY_UPLOAD_PRESET",
+      ].filter(Boolean).join(" and ")}. Check the .env file in the Vite project root and restart the dev server.`
+    );
+  }
+
+  const endpoint = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+  const body = new FormData();
+  body.append("file", file);
+  body.append("upload_preset", uploadPreset);
+  body.append("folder", "odikart/categories");
+
+  debug("Sending request to Cloudinary", {
+    endpoint,
+    uploadPreset,
+    folder: "odikart/categories",
+    method: "POST",
+  });
+
+  let response;
+  let rawResponse = "";
+  try {
+    response = await fetch(endpoint, { method: "POST", body });
+    rawResponse = await response.text();
+  } catch (networkError) {
+    console.error("[OdiKart Cloudinary Upload] Network/fetch failure", networkError);
+    throw new Error(`Could not reach Cloudinary: ${networkError?.message || "Network error"}. Check internet access, browser console, and any ad-blocker/network restrictions.`);
+  }
+
+  let data = {};
+  try {
+    data = rawResponse ? JSON.parse(rawResponse) : {};
+  } catch {
+    debug("Cloudinary returned a non-JSON response", {
+      responsePreview: rawResponse.slice(0, 500),
+    });
+  }
+
+  debug("Cloudinary response received", {
+    httpStatus: response.status,
+    httpOk: response.ok,
+    responseOk: data?.ok,
+    publicId: data?.public_id,
+    secureUrlReturned: Boolean(data?.secure_url),
+    errorMessage: data?.error?.message,
+    errorCode: data?.error?.http_code,
+    requestId: response.headers.get("x-cld-request-id"),
+  });
+
+  if (!response.ok || !data.secure_url) {
+    const cloudinaryMessage = data?.error?.message || rawResponse.slice(0, 300) || "No response body";
+    const error = new Error(`Cloudinary upload failed (HTTP ${response.status}): ${cloudinaryMessage}`);
+    error.status = response.status;
+    error.cloudinaryError = data?.error || null;
+    error.requestId = response.headers.get("x-cld-request-id");
+    console.error("[OdiKart Cloudinary Upload] Upload rejected", {
+      status: error.status,
+      cloudinaryError: error.cloudinaryError,
+      requestId: error.requestId,
+    });
+    throw error;
+  }
+
+  debug("Upload successful", {
+    publicId: data.public_id,
+    format: data.format,
+    width: data.width,
+    height: data.height,
+    bytes: data.bytes,
+  });
+
+  return data.secure_url;
+}
+
 const INITIAL_FORM = {
   name: "",
   description: "",
@@ -384,9 +496,43 @@ function CategoryModal({
   submitting,
   parents,
 }) {
+  const [uploadingImage, setUploadingImage] = useState(false);
+
   if (!open) return null;
 
   const isSubcategory = Boolean(form.parentCategory);
+
+  const handleImageSelection = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      console.info("[OdiKart Category Image] File selected", {
+        name: file.name,
+        type: file.type,
+        sizeBytes: file.size,
+      });
+      setUploadingImage(true);
+      const imageUrl = await uploadCategoryImage(file);
+      setForm((current) => ({ ...current, image: imageUrl }));
+      console.info("[OdiKart Category Image] Image URL saved to category form", {
+        urlReceived: Boolean(imageUrl),
+      });
+      toast.success("Category image uploaded to Cloudinary");
+    } catch (error) {
+      console.error("[OdiKart Category Image] Upload failed", {
+        message: error?.message,
+        status: error?.status,
+        cloudinaryError: error?.cloudinaryError,
+        requestId: error?.requestId,
+        error,
+      });
+      toast.error(error?.message || "Could not upload category image. Check browser console.");
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm md:items-center md:p-5">
@@ -479,18 +625,26 @@ function CategoryModal({
           </label>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <label>
+            <div>
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                Image URL
+                Category Image
               </span>
-              <input
-                type="url"
-                value={form.image}
-                onChange={(e) => setForm({ ...form, image: e.target.value })}
-                placeholder="https://..."
-                className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
-              />
-            </label>
+              <label className={`flex min-h-[46px] cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3.5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-500 hover:bg-slate-100 ${uploadingImage ? "pointer-events-none opacity-60" : ""}`}>
+                {uploadingImage ? (
+                  <><RefreshCw size={16} className="animate-spin" /> Uploading to Cloudinary...</>
+                ) : (
+                  <><ImageIcon size={17} /> Choose from Camera / Gallery</>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelection}
+                  disabled={uploadingImage || submitting}
+                  className="sr-only"
+                />
+              </label>
+              <p className="mt-1.5 text-xs text-slate-400">JPG, PNG or WEBP · Maximum 5 MB</p>
+            </div>
 
             <label>
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">
@@ -600,7 +754,7 @@ function CategoryModal({
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || uploadingImage}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? (
