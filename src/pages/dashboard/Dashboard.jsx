@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownRight,
@@ -147,17 +148,41 @@ function MiniBar({ label, value, total }) {
   );
 }
 
-export default function Dashboard() {
-  const [orders, setOrders] = useState([]);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [totalCustomers, setTotalCustomers] = useState(0);
-  const [totalSellers, setTotalSellers] = useState(0);
-  const [totalAdmins, setTotalAdmins] = useState(0);
-  const [products, setProducts] = useState([]);
-  const [couriers, setCouriers] = useState([]);
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+const DASHBOARD_CACHE_KEY = "odikart_admin_dashboard_cache_v1";
+const DASHBOARD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const readDashboardCache = () => {
+  try {
+    const raw = localStorage.getItem(DASHBOARD_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (!cached?.savedAt || Date.now() - cached.savedAt > DASHBOARD_CACHE_TTL) {
+      localStorage.removeItem(DASHBOARD_CACHE_KEY);
+      return null;
+    }
+    return cached.data || null;
+  } catch {
+    return null;
+  }
+};
+
+export default function Dashboard() {
+  // Render the last successful snapshot immediately, then refresh in the background.
+  const cached = useMemo(() => readDashboardCache(), []);
+  const hasLoadedFromNetwork = useRef(false);
+  const [cacheVersion, setCacheVersion] = useState(0);
+
+  const [orders, setOrders] = useState(() => cached?.orders || []);
+  const [totalUsers, setTotalUsers] = useState(() => cached?.totalUsers || 0);
+  const [totalCustomers, setTotalCustomers] = useState(() => cached?.totalCustomers || 0);
+  const [totalSellers, setTotalSellers] = useState(() => cached?.totalSellers || 0);
+  const [totalAdmins, setTotalAdmins] = useState(() => cached?.totalAdmins || 0);
+  const [products, setProducts] = useState(() => cached?.products || []);
+  const [couriers, setCouriers] = useState(() => cached?.couriers || []);
+
+  const [loading, setLoading] = useState(!cached);
+  const [refreshing, setRefreshing] = useState(Boolean(cached));
 
   const loadDashboard = async (silent = false) => {
     try {
@@ -268,13 +293,50 @@ export default function Dashboard() {
           "Unable to load dashboard"
       );
     } finally {
+      hasLoadedFromNetwork.current = true;
+      setCacheVersion((version) => version + 1);
       setLoading(false);
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadDashboard();
+    // Cache only after a network request completes, so stale cached data
+    // does not get a fresh timestamp just because the page mounted.
+    if (!hasLoadedFromNetwork.current) return;
+    try {
+      localStorage.setItem(
+        DASHBOARD_CACHE_KEY,
+        JSON.stringify({
+          savedAt: Date.now(),
+          data: {
+            orders,
+            totalUsers,
+            totalCustomers,
+            totalSellers,
+            totalAdmins,
+            products,
+            couriers,
+          },
+        })
+      );
+    } catch (error) {
+      // Storage may be unavailable or full; dashboard remains usable.
+      console.warn("Could not save dashboard cache:", error);
+    }
+  }, [
+    orders,
+    totalUsers,
+    totalCustomers,
+    totalSellers,
+    totalAdmins,
+    products,
+    couriers,
+    cacheVersion,
+  ]);
+
+  useEffect(() => {
+    loadDashboard(Boolean(cached));
   }, []);
 
   const stats = useMemo(() => {
@@ -420,6 +482,11 @@ export default function Dashboard() {
               </div>
               <p className="mt-1 text-sm text-neutral-500">
                 Overview of your Odikart marketplace.
+                {cached && (
+                  <span className="ml-2 text-xs text-neutral-400">
+                    Cached data loads instantly; refreshing in background.
+                  </span>
+                )}
               </p>
             </div>
 

@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Search,
@@ -44,15 +45,70 @@ import adminApi from "../../services/adminApi";
 
 const PAGE_SIZE = 10;
 
+// Short-lived browser cache for faster repeat visits to the Users page.
+const USERS_CACHE_KEY = "odikart_admin_users_cache_v1";
+const USERS_CACHE_TTL = 5 * 60 * 1000;
+
+const readUsersCache = () => {
+  try {
+    const raw = localStorage.getItem(USERS_CACHE_KEY);
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw);
+    const isValid =
+      cached &&
+      Array.isArray(cached.users) &&
+      Number.isFinite(cached.timestamp) &&
+      Date.now() - cached.timestamp < USERS_CACHE_TTL;
+
+    if (!isValid) {
+      localStorage.removeItem(USERS_CACHE_KEY);
+      return null;
+    }
+
+    return cached;
+  } catch (error) {
+    console.warn("Could not read Users cache:", error);
+    return null;
+  }
+};
+
+const writeUsersCache = (users) => {
+  try {
+    localStorage.setItem(
+      USERS_CACHE_KEY,
+      JSON.stringify({
+        users,
+        timestamp: Date.now(),
+      })
+    );
+  } catch (error) {
+    // Storage may be unavailable or full; the page still works without cache.
+    console.warn("Could not save Users cache:", error);
+  }
+};
+
+const clearUsersCache = () => {
+  try {
+    localStorage.removeItem(USERS_CACHE_KEY);
+  } catch (error) {
+    console.warn("Could not clear Users cache:", error);
+  }
+};
+
 const Users = () => {
   // ==========================================
   // STATE
   // ==========================================
 
-  const [users, setUsers] = useState([]);
+  const [initialCache] = useState(readUsersCache);
+
+  const [users, setUsers] = useState(
+    () => initialCache?.users || []
+  );
 
   const [loading, setLoading] =
-    useState(true);
+    useState(() => !initialCache);
 
   const [refreshing, setRefreshing] =
     useState(false);
@@ -115,7 +171,7 @@ const Users = () => {
     try {
       if (showRefresh) {
         setRefreshing(true);
-      } else {
+      } else if (!initialCache) {
         setLoading(true);
       }
 
@@ -148,6 +204,7 @@ const Users = () => {
       }
 
       setUsers(fetchedUsers);
+      writeUsersCache(fetchedUsers);
     } catch (err) {
       console.error(
         "Failed to fetch users:",
@@ -168,7 +225,8 @@ const Users = () => {
   };
 
   useEffect(() => {
-    fetchUsers();
+    // Show cached users immediately, then refresh silently in the background.
+    fetchUsers(Boolean(initialCache));
   }, []);
 
   // ==========================================
@@ -711,6 +769,7 @@ const Users = () => {
       setDrawerOpen(false);
       setSelectedUser(null);
 
+      clearUsersCache();
       await fetchUsers(true);
     } catch (err) {
       console.error(
@@ -769,6 +828,7 @@ const Users = () => {
 
       setSelectedUsers([]);
 
+      clearUsersCache();
       await fetchUsers(true);
     } catch (err) {
       console.error(
@@ -1046,6 +1106,11 @@ const Users = () => {
 
               <p className="text-sm text-slate-500 mt-1.5">
                 Manage customers, sellers and platform users.
+                {initialCache && (
+                  <span className="ml-2 text-xs text-emerald-600">
+                    Cached data shown · refreshing in background
+                  </span>
+                )}
               </p>
 
             </div>

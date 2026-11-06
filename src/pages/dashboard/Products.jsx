@@ -50,6 +50,64 @@ import adminApi from "../../services/adminApi";
 
 const PAGE_LIMIT = 10;
 
+// Product list cache: keeps recently viewed filters/pages ready for quick access.
+const PRODUCTS_CACHE_KEY = "odikart_admin_products_cache_v1";
+const PRODUCTS_CACHE_TTL = 5 * 60 * 1000;
+
+const getProductsCacheKey = (page, status, search) =>
+  `${page}|${status || "all"}|${String(search || "").trim().toLowerCase()}`;
+
+const readProductsCache = (cacheKey) => {
+  try {
+    const raw = localStorage.getItem(PRODUCTS_CACHE_KEY);
+    if (!raw) return null;
+
+    const cache = JSON.parse(raw);
+    const entry = cache?.[cacheKey];
+
+    if (!entry || Date.now() - entry.timestamp > PRODUCTS_CACHE_TTL) {
+      if (entry) {
+        delete cache[cacheKey];
+        localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(cache));
+      }
+      return null;
+    }
+
+    return entry.data || null;
+  } catch (error) {
+    console.warn("Products cache read failed:", error);
+    return null;
+  }
+};
+
+const writeProductsCache = (cacheKey, data) => {
+  try {
+    const raw = localStorage.getItem(PRODUCTS_CACHE_KEY);
+    const cache = raw ? JSON.parse(raw) : {};
+
+    // Remove expired entries and keep the most recent 20 query combinations.
+    Object.keys(cache).forEach((key) => {
+      if (Date.now() - Number(cache[key]?.timestamp || 0) > PRODUCTS_CACHE_TTL) {
+        delete cache[key];
+      }
+    });
+
+    cache[cacheKey] = { timestamp: Date.now(), data };
+
+    const recentEntries = Object.entries(cache)
+      .sort((a, b) => b[1].timestamp - a[1].timestamp)
+      .slice(0, 20);
+
+    localStorage.setItem(
+      PRODUCTS_CACHE_KEY,
+      JSON.stringify(Object.fromEntries(recentEntries))
+    );
+  } catch (error) {
+    // Storage can be full or disabled; API functionality must still work.
+    console.warn("Products cache write failed:", error);
+  }
+};
+
 const STATUS_OPTIONS = [
   {
     value: "all",
@@ -3276,164 +3334,83 @@ const Products = () => {
     requestedStatus = status,
     requestedSearch = search,
   } = {}) => {
-    try {
-      setLoading(true);
+    const normalizedSearch = String(requestedSearch || "").trim();
+    const cacheKey = getProductsCacheKey(requestedPage, requestedStatus, normalizedSearch);
+    const cachedData = readProductsCache(cacheKey);
 
-      const params = {
-        page: requestedPage,
-        limit: PAGE_LIMIT,
+    // Show the last result immediately while the API refreshes in the background.
+    if (cachedData) {
+      setProducts(Array.isArray(cachedData.products) ? cachedData.products : []);
+      setStats(cachedData.stats || {
+        total: 0, pending: 0, approved: 0, rejected: 0, blocked: 0, draft: 0,
+      });
+      setPagination(cachedData.pagination || {
+        total: 0, page: requestedPage, pages: 1, limit: PAGE_LIMIT,
+      });
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const params = { page: requestedPage, limit: PAGE_LIMIT };
+
+      if (requestedStatus && requestedStatus !== "all") {
+        params.status = requestedStatus;
+      }
+      if (normalizedSearch) {
+        params.search = normalizedSearch;
+      }
+
+      // GET /api/products/admin/all
+      const response = await adminApi.get("/products/admin/all", { params });
+      const data = response.data || {};
+      const fetchedProducts = Array.isArray(data.products) ? data.products : [];
+      const counts = data.statusCounts || {};
+
+      const nextStats = {
+        total: Number(data.total ?? data.count ?? 0),
+        pending: Number(data.pending ?? counts.pending ?? 0),
+        approved: Number(data.approved ?? counts.approved ?? 0),
+        rejected: Number(data.rejected ?? counts.rejected ?? 0),
+        blocked: Number(data.blocked ?? counts.blocked ?? 0),
+        draft: Number(data.draft ?? counts.draft ?? 0),
       };
 
-      if (
-        requestedStatus &&
-        requestedStatus !== "all"
-      ) {
-        params.status =
-          requestedStatus;
-      }
+      const total = Number(data.total ?? data.count ?? 0);
+      const responseLimit = Number(data.limit || PAGE_LIMIT);
+      const responsePage = Number(data.page || requestedPage);
+      const responsePages = Number(
+        data.pages ?? data.totalPages ??
+        Math.max(1, Math.ceil(total / responseLimit))
+      );
 
-      if (
-        requestedSearch &&
-        requestedSearch.trim()
-      ) {
-        params.search =
-          requestedSearch.trim();
-      }
-
-      /*
-        REAL BACKEND ROUTE:
-
-        GET /api/products/admin/all
-      */
-
-      const response =
-        await adminApi.get(
-          "/products/admin/all",
-          {
-            params,
-          }
-        );
-
-      const data = response.data || {};
-
-      const fetchedProducts =
-        Array.isArray(data.products)
-          ? data.products
-          : [];
-
-      setProducts(fetchedProducts);
-
-      /*
-        Backend may return either:
-
-        pending
-        approved
-        rejected
-        blocked
-        draft
-
-        or a statusCounts object.
-
-        Support both.
-      */
-
-      const counts =
-        data.statusCounts || {};
-
-      setStats({
-        total:
-          Number(
-            data.total ??
-              data.count ??
-              0
-          ),
-
-        pending:
-          Number(
-            data.pending ??
-              counts.pending ??
-              0
-          ),
-
-        approved:
-          Number(
-            data.approved ??
-              counts.approved ??
-              0
-          ),
-
-        rejected:
-          Number(
-            data.rejected ??
-              counts.rejected ??
-              0
-          ),
-
-        blocked:
-          Number(
-            data.blocked ??
-              counts.blocked ??
-              0
-          ),
-
-        draft:
-          Number(
-            data.draft ??
-              counts.draft ??
-              0
-          ),
-      });
-
-      const total =
-        Number(
-          data.total ??
-            data.count ??
-            0
-        );
-
-      const responseLimit =
-        Number(
-          data.limit || PAGE_LIMIT
-        );
-
-      const responsePage =
-        Number(
-          data.page ||
-            requestedPage
-        );
-
-      const responsePages =
-        Number(
-          data.pages ??
-            data.totalPages ??
-            Math.max(
-              1,
-              Math.ceil(
-                total /
-                  responseLimit
-              )
-            )
-        );
-
-      setPagination({
+      const nextPagination = {
         total,
         page: responsePage,
         pages: responsePages,
         limit: responseLimit,
+      };
+
+      setProducts(fetchedProducts);
+      setStats(nextStats);
+      setPagination(nextPagination);
+
+      writeProductsCache(cacheKey, {
+        products: fetchedProducts,
+        stats: nextStats,
+        pagination: nextPagination,
       });
     } catch (error) {
-      console.error(
-        "Admin product fetch error:",
-        error
-      );
+      console.error("Admin product fetch error:", error);
 
-      toast.error(
-        error.response?.data
-          ?.message ||
-          "Failed to load products"
-      );
-
-      setProducts([]);
+      // Do not erase a usable cached list when the network is unavailable.
+      if (!cachedData) {
+        setProducts([]);
+        toast.error(error.response?.data?.message || "Failed to load products");
+      } else {
+        toast.error("Showing saved products. Refresh failed.");
+      }
     } finally {
       setLoading(false);
     }

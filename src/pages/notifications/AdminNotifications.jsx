@@ -1,5 +1,3 @@
-
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bell,
@@ -17,6 +15,52 @@ import {
   LoaderCircle,
   AlertCircle,
 } from "lucide-react";
+const ADMIN_NOTIFICATIONS_CACHE_KEY = "odikart_admin_notifications_cache_v1";
+const ADMIN_NOTIFICATIONS_CACHE_TTL = 5 * 60 * 1000;
+
+const readAdminNotificationsCache = () => {
+  try {
+    const raw = localStorage.getItem(ADMIN_NOTIFICATIONS_CACHE_KEY);
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw);
+    const valid =
+      cached &&
+      Array.isArray(cached.items) &&
+      typeof cached.savedAt === "number" &&
+      Date.now() - cached.savedAt < ADMIN_NOTIFICATIONS_CACHE_TTL;
+
+    if (!valid) {
+      localStorage.removeItem(ADMIN_NOTIFICATIONS_CACHE_KEY);
+      return null;
+    }
+
+    return cached.items;
+  } catch (error) {
+    console.warn("Unable to read admin notifications cache:", error);
+    try {
+      localStorage.removeItem(ADMIN_NOTIFICATIONS_CACHE_KEY);
+    } catch {
+      // Ignore localStorage access errors.
+    }
+    return null;
+  }
+};
+
+const writeAdminNotificationsCache = (items) => {
+  try {
+    localStorage.setItem(
+      ADMIN_NOTIFICATIONS_CACHE_KEY,
+      JSON.stringify({
+        items: Array.isArray(items) ? items : [],
+        savedAt: Date.now(),
+      })
+    );
+  } catch (error) {
+    console.warn("Unable to save admin notifications cache:", error);
+  }
+};
+
 import {
   getAdminNotifications,
   createAdminNotification,
@@ -72,8 +116,8 @@ const formatDate = (value) => {
 };
 
 export default function AdminNotifications() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState(() => readAdminNotificationsCache() || []);
+  const [loading, setLoading] = useState(() => readAdminNotificationsCache() === null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -91,7 +135,9 @@ export default function AdminNotifications() {
     setError("");
     try {
       const response = await getAdminNotifications();
-      setItems(getList(response));
+      const freshItems = getList(response);
+      setItems(freshItems);
+      writeAdminNotificationsCache(freshItems);
     } catch (err) {
       setError(
         err?.response?.data?.message ||
@@ -290,7 +336,11 @@ export default function AdminNotifications() {
     setNotice("");
     try {
       await deleteAdminNotification(id);
-      setItems((current) => current.filter((row) => getId(row) !== id));
+      setItems((current) => {
+        const updatedItems = current.filter((row) => getId(row) !== id);
+        writeAdminNotificationsCache(updatedItems);
+        return updatedItems;
+      });
       setNotice("Notification deleted.");
     } catch (err) {
       setError(err?.response?.data?.message || "Could not delete notification.");

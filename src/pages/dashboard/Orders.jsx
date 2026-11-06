@@ -1,3 +1,4 @@
+
 import React, {
   useEffect,
   useMemo,
@@ -712,19 +713,59 @@ const getStatusClass = (status) => {
 
 
 /* =========================================================
+   ORDERS CACHE
+========================================================= */
+
+const ORDERS_CACHE_KEY = "odikart_admin_orders_cache_v1";
+const ORDERS_CACHE_TTL = 5 * 60 * 1000;
+
+const readOrdersCache = () => {
+  try {
+    if (typeof window === "undefined") return null;
+
+    const raw = window.localStorage.getItem(ORDERS_CACHE_KEY);
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw);
+    const isFresh =
+      cached &&
+      Array.isArray(cached.orders) &&
+      Number.isFinite(cached.savedAt) &&
+      Date.now() - cached.savedAt < ORDERS_CACHE_TTL;
+
+    if (!isFresh) {
+      window.localStorage.removeItem(ORDERS_CACHE_KEY);
+      return null;
+    }
+
+    return cached.orders;
+  } catch (error) {
+    console.warn("[OdiKart Orders Cache] Could not read cache:", error);
+    return null;
+  }
+};
+
+const writeOrdersCache = (orders) => {
+  try {
+    if (typeof window === "undefined" || !Array.isArray(orders)) return;
+    window.localStorage.setItem(
+      ORDERS_CACHE_KEY,
+      JSON.stringify({ orders, savedAt: Date.now() })
+    );
+  } catch (error) {
+    // Storage may be full or disabled. Orders should still work normally.
+    console.warn("[OdiKart Orders Cache] Could not write cache:", error);
+  }
+};
+
+/* =========================================================
    MAIN COMPONENT
 ========================================================= */
 
 export default function Orders() {
-  const [
-    orders,
-    setOrders,
-  ] = useState([]);
+  const [orders, setOrders] = useState(() => readOrdersCache() || []);
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+  const [loading, setLoading] = useState(() => readOrdersCache() === null);
 
   const [
     refreshing,
@@ -853,11 +894,12 @@ export default function Orders() {
         );
       }
 
-      setOrders(
-        Array.isArray(data.orders)
-          ? data.orders
-          : []
-      );
+      const freshOrders = Array.isArray(data.orders)
+        ? data.orders
+        : [];
+
+      setOrders(freshOrders);
+      writeOrdersCache(freshOrders);
     } catch (error) {
       toast.error(
         error?.response?.data?.message ||
@@ -872,7 +914,8 @@ export default function Orders() {
 
 
   useEffect(() => {
-    loadOrders();
+    // Show cached orders immediately, then refresh from the server.
+    loadOrders(true);
     loadCouriers();
   }, []);
 
@@ -1143,16 +1186,13 @@ export default function Orders() {
             data.order
           );
 
-          setOrders((prev) =>
-            prev.map(
-              (order) =>
-                String(
-                  order._id
-                ) === String(id)
-                  ? data.order
-                  : order
-            )
-          );
+          setOrders((prev) => {
+            const updatedOrders = prev.map((order) =>
+              String(order._id) === String(id) ? data.order : order
+            );
+            writeOrdersCache(updatedOrders);
+            return updatedOrders;
+          });
         }
       } catch (error) {
       }

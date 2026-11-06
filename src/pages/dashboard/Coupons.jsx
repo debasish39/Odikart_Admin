@@ -9,6 +9,39 @@ import {
 } from "../../services/couponApi";
 import { toast } from "react-hot-toast";
 
+// Five-minute cache for instant rendering; the API remains the source of truth.
+const COUPON_CACHE_KEY = "odikart_admin_coupons_cache_v1";
+const COUPON_CACHE_TTL = 5 * 60 * 1000;
+
+function readCouponCache() {
+  try {
+    const raw = localStorage.getItem(COUPON_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.coupons)) return null;
+    return {
+      coupons: parsed.coupons,
+      savedAt: Number(parsed.savedAt) || 0,
+      isFresh: Date.now() - (Number(parsed.savedAt) || 0) < COUPON_CACHE_TTL,
+    };
+  } catch (error) {
+    console.warn("[OdiKart Coupons Cache] Could not read cache:", error);
+    return null;
+  }
+}
+
+function writeCouponCache(coupons) {
+  try {
+    localStorage.setItem(COUPON_CACHE_KEY, JSON.stringify({
+      coupons,
+      savedAt: Date.now(),
+    }));
+  } catch (error) {
+    // Storage can be unavailable or full; coupon management should still work.
+    console.warn("[OdiKart Coupons Cache] Could not save cache:", error);
+  }
+}
+
 const emptyForm = {
   code: "",
   discountType: "PERCENTAGE",
@@ -194,8 +227,8 @@ const DeleteModal = ({ coupon, onClose, onConfirm, deleting }) => {
 };
 
 const Coupons = () => {
-  const [coupons, setCoupons] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [coupons, setCoupons] = useState(() => readCouponCache()?.coupons || []);
+  const [loading, setLoading] = useState(() => !readCouponCache()?.coupons?.length);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
@@ -208,11 +241,18 @@ const Coupons = () => {
 
   const load = async (initial = false) => {
     try {
-      initial ? setLoading(true) : setRefreshing(true);
+      // Keep cached rows visible while refreshing in the background.
+      if (initial && coupons.length === 0) setLoading(true);
+      else setRefreshing(true);
+
       const data = await getCoupons();
-      setCoupons(Array.isArray(data?.coupons) ? data.coupons : []);
+      const freshCoupons = Array.isArray(data?.coupons) ? data.coupons : [];
+      setCoupons(freshCoupons);
+      writeCouponCache(freshCoupons);
     } catch (e) {
-      toast.error(e?.response?.data?.message || "Failed to load coupons");
+      const message = e?.response?.data?.message || "Failed to load coupons";
+      if (coupons.length === 0) toast.error(message);
+      else console.warn("[OdiKart Coupons] Background refresh failed:", message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -308,7 +348,11 @@ const Coupons = () => {
     try {
       const next = !c.isActive;
       await updateCoupon(c._id, { isActive: next });
-      setCoupons((prev) => prev.map((x) => x._id === c._id ? { ...x, isActive: next } : x));
+      setCoupons((prev) => {
+        const updated = prev.map((x) => x._id === c._id ? { ...x, isActive: next } : x);
+        writeCouponCache(updated);
+        return updated;
+      });
       toast.success(next ? "Coupon activated" : "Coupon deactivated");
     } catch (e) {
       toast.error(e?.response?.data?.message || "Failed to update coupon");
@@ -320,7 +364,11 @@ const Coupons = () => {
     try {
       setDeleting(true);
       await deleteCoupon(deleteTarget._id);
-      setCoupons((prev) => prev.filter((c) => c._id !== deleteTarget._id));
+      setCoupons((prev) => {
+        const updated = prev.filter((c) => c._id !== deleteTarget._id);
+        writeCouponCache(updated);
+        return updated;
+      });
       setDeleteTarget(null);
       toast.success("Coupon deleted");
     } catch (e) {

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Plus,
@@ -143,6 +144,50 @@ async function uploadCategoryImage(file) {
   });
 
   return data.secure_url;
+}
+
+
+const CATEGORY_CACHE_KEY = "odikart_admin_categories_cache_v1";
+const CATEGORY_CACHE_TTL = 5 * 60 * 1000;
+
+function readCategoryCache() {
+  try {
+    const raw = localStorage.getItem(CATEGORY_CACHE_KEY);
+    if (!raw) return [];
+    const cached = JSON.parse(raw);
+    if (
+      !cached ||
+      !Array.isArray(cached.categories) ||
+      Date.now() - Number(cached.savedAt || 0) > CATEGORY_CACHE_TTL
+    ) {
+      localStorage.removeItem(CATEGORY_CACHE_KEY);
+      return [];
+    }
+    return cached.categories;
+  } catch (error) {
+    console.warn("[OdiKart Categories Cache] Could not read cache", error);
+    return [];
+  }
+}
+
+function writeCategoryCache(categories) {
+  try {
+    localStorage.setItem(
+      CATEGORY_CACHE_KEY,
+      JSON.stringify({ categories, savedAt: Date.now() })
+    );
+  } catch (error) {
+    // The page still works when storage is unavailable or full.
+    console.warn("[OdiKart Categories Cache] Could not save cache", error);
+  }
+}
+
+function clearCategoryCache() {
+  try {
+    localStorage.removeItem(CATEGORY_CACHE_KEY);
+  } catch (error) {
+    console.warn("[OdiKart Categories Cache] Could not clear cache", error);
+  }
 }
 
 const INITIAL_FORM = {
@@ -818,8 +863,8 @@ function DeleteModal({ category, onClose, onConfirm, deleting }) {
 }
 
 export default function Categories() {
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState(() => readCategoryCache());
+  const [loading, setLoading] = useState(() => readCategoryCache().length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
@@ -840,10 +885,12 @@ export default function Categories() {
       setError("");
 
       if (isRefresh) setRefreshing(true);
-      else setLoading(true);
+      else if (categories.length === 0) setLoading(true);
 
       const response = await getCategoryTree();
-      setCategories(normalizeCategories(response));
+      const freshCategories = normalizeCategories(response);
+      setCategories(freshCategories);
+      writeCategoryCache(freshCategories);
     } catch (err) {
       const message =
         err?.response?.data?.message ||
@@ -993,9 +1040,11 @@ export default function Categories() {
       if (editing) {
         payload.isActive = form.isActive !== false;
 
+        clearCategoryCache();
         await updateCategory(editing._id, payload);
         toast.success("Category updated successfully");
       } else {
+        clearCategoryCache();
         await createCategory(payload);
 
         toast.success(
@@ -1024,6 +1073,7 @@ export default function Categories() {
     try {
       setDeleting(true);
 
+      clearCategoryCache();
       await deleteCategory(deleteTarget._id);
 
       toast.success("Category deactivated successfully");
@@ -1043,6 +1093,7 @@ export default function Categories() {
 
   const toggleStatus = async (category) => {
     try {
+      clearCategoryCache();
       await updateCategory(category._id, {
         isActive: category.isActive === false,
       });
@@ -1064,6 +1115,7 @@ export default function Categories() {
 
   const toggleFeatured = async (category) => {
     try {
+      clearCategoryCache();
       await updateCategory(category._id, {
         featured: !category.featured,
       });
