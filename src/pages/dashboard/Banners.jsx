@@ -14,6 +14,7 @@ import {
   updateBannerStatus,
   deleteBanner,
 } from "../../services/bannerApi";
+import { getAdminProducts } from "../../services/productApi";
 
 const INITIAL_FORM = {
   title: "",
@@ -79,6 +80,26 @@ const statusClasses = {
   Expired: "bg-rose-50 text-rose-700 ring-rose-600/15",
 };
 
+const getProductId = (product) =>
+  typeof product === "string" ? product : product?._id;
+
+const getProductTitle = (product) =>
+  typeof product === "string" ? "Selected product" : product?.title || "Untitled product";
+
+const getProductImage = (product) =>
+  product?.media?.thumbnail ||
+  product?.media?.images?.[0] ||
+  product?.variants?.find((variant) => variant?.images?.length)?.images?.[0] ||
+  "";
+
+const getProductPrice = (product) => {
+  const prices = (product?.variants || [])
+    .filter((variant) => variant?.isActive !== false)
+    .map((variant) => Number(variant?.price))
+    .filter((price) => Number.isFinite(price) && price >= 0);
+  return prices.length ? Math.min(...prices) : null;
+};
+
 export default function Banners() {
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +116,10 @@ export default function Banners() {
   const [desktopPreview, setDesktopPreview] = useState("");
   const [mobilePreview, setMobilePreview] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const [selectedProducts, setSelectedProducts] = useState([]);
 
   const loadBanners = async (quiet = false) => {
     try {
@@ -111,7 +136,41 @@ export default function Banners() {
     }
   };
 
+  const loadProducts = async (searchTerm = "") => {
+    try {
+      setProductsLoading(true);
+      const response = await getAdminProducts({
+        search: searchTerm,
+        page: 1,
+        limit: 30,
+      });
+      const list = Array.isArray(response?.products)
+        ? response.products
+        : Array.isArray(response?.data?.products)
+          ? response.data.products
+          : [];
+      setProducts(list);
+      setSelectedProducts((current) =>
+        current.map((selected) => {
+          const id = getProductId(selected);
+          return list.find((item) => getProductId(item) === id) || selected;
+        })
+      );
+    } catch (error) {
+      console.error("Load products error:", error);
+      toast.error(error.response?.data?.message || "Couldn't load products");
+    } finally {
+      setProductsLoading(false);
+    }
+  };
+
   useEffect(() => { loadBanners(); }, []);
+
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+    const timer = setTimeout(() => loadProducts(productSearch.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [modalOpen, productSearch]);
 
   const stats = useMemo(() => ({
     total: banners.length,
@@ -151,6 +210,9 @@ export default function Banners() {
     setMobileFile(null);
     setDesktopPreview("");
     setMobilePreview("");
+    setSelectedProducts([]);
+    setProductSearch("");
+    setProducts([]);
   };
 
   const openCreate = () => {
@@ -177,7 +239,26 @@ export default function Banners() {
     setMobileFile(null);
     setDesktopPreview(banner.image?.url || "");
     setMobilePreview(banner.mobileImage?.url || "");
+    setSelectedProducts(Array.isArray(banner.products) ? banner.products.filter(Boolean) : []);
+    setProductSearch("");
     setModalOpen(true);
+  };
+
+  const toggleProduct = (product) => {
+    const productId = getProductId(product);
+    if (!productId) return;
+    setSelectedProducts((current) => {
+      const exists = current.some((item) => getProductId(item) === productId);
+      return exists
+        ? current.filter((item) => getProductId(item) !== productId)
+        : [...current, product];
+    });
+  };
+
+  const removeSelectedProduct = (productId) => {
+    setSelectedProducts((current) =>
+      current.filter((item) => getProductId(item) !== productId)
+    );
   };
 
   const chooseImage = (event, type) => {
@@ -227,6 +308,10 @@ export default function Banners() {
       });
       if (desktopFile) body.append("image", desktopFile);
       if (mobileFile) body.append("mobileImage", mobileFile);
+      body.append(
+        "products",
+        JSON.stringify(selectedProducts.map(getProductId).filter(Boolean))
+      );
 
       if (editing) {
         await updateBanner(editing._id, body);
@@ -399,7 +484,111 @@ export default function Banners() {
                   </div>
                 </FormSection>
 
-                <FormSection number="03" title="Click destination" description="Choose where customers should go after tapping this banner.">
+                <FormSection
+                  number="03"
+                  title="Products below this banner"
+                  description="Search and select products to display in a horizontal shelf below this campaign."
+                >
+                  <div className="space-y-4">
+                    <div className="relative">
+                      <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={productSearch}
+                        onChange={(event) => setProductSearch(event.target.value)}
+                        placeholder="Search products by title..."
+                        className="control pl-10"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-slate-700">Available products</p>
+                      <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold text-blue-700">
+                        {selectedProducts.length} selected
+                      </span>
+                    </div>
+
+                    {selectedProducts.length > 0 && (
+                      <div className="flex flex-wrap gap-2 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
+                        {selectedProducts.map((product) => {
+                          const id = getProductId(product);
+                          return (
+                            <span key={id} className="inline-flex max-w-full items-center gap-2 rounded-xl border border-blue-100 bg-white py-1.5 pl-2 pr-1.5 text-xs font-semibold text-slate-700 shadow-sm">
+                              <span className="max-w-[180px] truncate">{getProductTitle(product)}</span>
+                              <button type="button" onClick={() => removeSelectedProduct(id)} className="rounded-lg p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="Remove selected product">
+                                <X size={13} />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="max-h-72 overflow-y-auto rounded-2xl border border-slate-200">
+                      {productsLoading ? (
+                        <div className="space-y-3 p-4">
+                          {[1, 2, 3].map((item) => (
+                            <div key={item} className="flex animate-pulse items-center gap-3">
+                              <div className="h-12 w-12 rounded-xl bg-slate-200" />
+                              <div className="flex-1 space-y-2">
+                                <div className="h-3 w-2/3 rounded bg-slate-200" />
+                                <div className="h-2 w-1/3 rounded bg-slate-100" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : products.length === 0 ? (
+                        <div className="px-4 py-10 text-center">
+                          <ImageIcon size={25} className="mx-auto text-slate-300" />
+                          <p className="mt-2 text-sm font-semibold text-slate-600">No products found</p>
+                          <p className="mt-1 text-xs text-slate-400">Try another product name.</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-100">
+                          {products.map((product) => {
+                            const id = getProductId(product);
+                            const selected = selectedProducts.some((item) => getProductId(item) === id);
+                            const image = getProductImage(product);
+                            const price = getProductPrice(product);
+                            return (
+                              <button
+                                type="button"
+                                key={id}
+                                onClick={() => toggleProduct(product)}
+                                className={`flex w-full items-center gap-3 p-3 text-left transition hover:bg-slate-50 ${selected ? "bg-blue-50/70" : "bg-white"}`}
+                              >
+                                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${selected ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white"}`}>
+                                  {selected && <CheckCircle2 size={16} />}
+                                </span>
+                                {image ? (
+                                  <img src={image} alt={product.title || "Product"} className="h-12 w-12 shrink-0 rounded-xl border border-slate-100 object-cover" />
+                                ) : (
+                                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+                                    <ImageIcon size={18} />
+                                  </span>
+                                )}
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-xs font-bold text-slate-800">{product.title || "Untitled product"}</span>
+                                  <span className="mt-1 block text-[11px] text-slate-500">
+                                    {price !== null ? `From ₹${number(price)}` : "Price unavailable"}
+                                    {product.status ? ` · ${product.status}` : ""}
+                                  </span>
+                                </span>
+                                <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${selected ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>
+                                  {selected ? "Selected" : "Add"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] leading-5 text-slate-400">
+                      Only approved and active products can be saved by the banner API.
+                    </p>
+                  </div>
+                </FormSection>
+
+                <FormSection number="04" title="Click destination" description="Choose where customers should go after tapping this banner.">
                   <div className="grid gap-4 md:grid-cols-2">
                     <InputField label="Destination type"><select value={form.redirectType} onChange={(e) => setField("redirectType", e.target.value)} className="control">{REDIRECT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></InputField>
                     {["category", "product", "collection"].includes(form.redirectType) && <InputField label="Destination ID"><input value={form.redirectId} onChange={(e) => setField("redirectId", e.target.value)} placeholder="Paste category / product ID" className="control" /></InputField>}
@@ -407,7 +596,7 @@ export default function Banners() {
                   </div>
                 </FormSection>
 
-                <FormSection number="04" title="Schedule & visibility" description="Leave dates empty if this banner should not have a time limit.">
+                <FormSection number="05" title="Schedule & visibility" description="Leave dates empty if this banner should not have a time limit.">
                   <div className="grid gap-4 md:grid-cols-2">
                     <InputField label="Start date & time"><input type="datetime-local" value={form.startDate} onChange={(e) => setField("startDate", e.target.value)} className="control" /></InputField>
                     <InputField label="End date & time"><input type="datetime-local" min={form.startDate || undefined} value={form.endDate} onChange={(e) => setField("endDate", e.target.value)} className="control" /></InputField>
@@ -479,7 +668,7 @@ function BannerCard({ banner, onEdit, onDelete, onToggle }) {
       </div>
       <div className="p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="truncate text-base font-bold text-slate-900">{banner.title || "Untitled banner"}</h3><p className="mt-1 line-clamp-2 min-h-9 text-xs leading-5 text-slate-500">{banner.subtitle || "No campaign description added."}</p></div><button onClick={onEdit} title="Edit campaign" className="shrink-0 rounded-xl border border-slate-200 p-2 text-slate-500 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"><Edit3 size={16} /></button></div>
-        <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-semibold text-slate-600">{placementLabel}</span><span className="rounded-lg bg-indigo-50 px-2.5 py-1.5 text-[10px] font-semibold capitalize text-indigo-700">{banner.redirectType || "no redirect"}</span>{banner.mobileImage?.url && <span className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-700">Mobile image</span>}</div>
+        <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-semibold text-slate-600">{placementLabel}</span><span className="rounded-lg bg-indigo-50 px-2.5 py-1.5 text-[10px] font-semibold capitalize text-indigo-700">{banner.redirectType || "no redirect"}</span>{banner.mobileImage?.url && <span className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-700">Mobile image</span>}<span className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-[10px] font-semibold text-blue-700">{Array.isArray(banner.products) ? banner.products.length : 0} products</span></div>
         <div className="mt-4 grid grid-cols-2 divide-x divide-slate-100 rounded-xl bg-slate-50 px-3 py-3"><div className="pr-3"><div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400"><Eye size={13} /> Impressions</div><p className="mt-1 text-lg font-bold text-slate-800">{number(banner.impressions)}</p></div><div className="pl-4"><div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400"><MousePointerClick size={13} /> Clicks</div><p className="mt-1 text-lg font-bold text-slate-800">{number(banner.clicks)}</p></div></div>
         <div className="mt-4 space-y-2 text-[11px] text-slate-500"><div className="flex items-center gap-2"><CalendarDays size={13} className="shrink-0 text-slate-400" /><span className="w-11 shrink-0 font-semibold text-slate-400">Starts</span><span className="truncate">{formatDate(banner.startDate)}</span></div><div className="flex items-center gap-2"><Clock3 size={13} className="shrink-0 text-slate-400" /><span className="w-11 shrink-0 font-semibold text-slate-400">Ends</span><span className="truncate">{formatDate(banner.endDate)}</span></div></div>
         <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3"><button onClick={onToggle} className={`inline-flex items-center gap-1.5 text-xs font-semibold transition ${banner.isActive ? "text-emerald-700 hover:text-emerald-800" : "text-slate-500 hover:text-slate-700"}`}>{banner.isActive ? <ToggleRight size={21} /> : <ToggleLeft size={21} />}{banner.isActive ? "Enabled" : "Disabled"}</button><div className="flex items-center gap-1"><button onClick={onEdit} className="rounded-lg px-3 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-50">Edit campaign</button><button onClick={onDelete} title="Delete campaign" className="rounded-lg p-2 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15} /></button></div></div>
