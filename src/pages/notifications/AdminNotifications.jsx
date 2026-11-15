@@ -72,16 +72,16 @@ import {
 } from "../../services/notificationApi";
 
 const TYPES = [
-  "announcement",
-  "offer",
-  "promotion",
-  "order_update",
-  "delivery",
-  "account",
-  "system",
-  "new_product",
-  "coupon",
-  "flash_sale",
+  { value: "announcement", label: "Announcement" },
+  { value: "offer", label: "Offer" },
+  { value: "promotion", label: "Promotion" },
+  { value: "order_update", label: "Order update" },
+  { value: "delivery", label: "Delivery" },
+  { value: "account", label: "Account" },
+  { value: "system", label: "System" },
+  { value: "new_product", label: "New product" },
+  { value: "coupon", label: "Coupon" },
+  { value: "flash_sale", label: "Flash sale" },
 ];
 
 const emptyForm = {
@@ -308,6 +308,8 @@ export default function AdminNotifications() {
         await sendPromotionToAllCustomers({
           title: payload.title,
           message: payload.message,
+          type: payload.type,
+          isPromotional: payload.isPromotional,
           link: payload.link || "/",
           imageUrl: payload.imageUrl,
         });
@@ -470,7 +472,29 @@ export default function AdminNotifications() {
               {(modal === "create" || modal === "send") && <Field label="Customer User ID" hint="Use the MongoDB user _id."><input required value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} placeholder="e.g. 66f..." className={inputClass} /></Field>}
               <Field label="Title"><input required maxLength={120} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="e.g. Your order is on the way" className={inputClass} /></Field>
               <Field label={modal === "broadcast" ? "Message (optional)" : "Message"}><textarea required={modal !== "broadcast"} rows={4} maxLength={1500} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder={modal === "broadcast" ? "Optional offer details…" : "Write a clear, helpful message…"} className={`${inputClass} resize-y`} /></Field>
-              {modal !== "broadcast" && <Field label="Notification type"><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={inputClass}>{TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></Field>}
+              <Field
+                label="Notification type"
+                hint="Choose how this notification should be categorized in the customer's app."
+              >
+                <select
+                  value={form.type}
+                  onChange={(e) => {
+                    const type = e.target.value;
+                    setForm((current) => ({
+                      ...current,
+                      type,
+                      isPromotional: ["offer", "promotion", "coupon", "flash_sale"].includes(type),
+                    }));
+                  }}
+                  className={inputClass}
+                >
+                  {TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Link (optional)" hint="A relative path like /orders or a full URL."><input value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="/orders" className={inputClass} /></Field>
               {modal === "broadcast" && (
                 <div>
@@ -511,8 +535,25 @@ export default function AdminNotifications() {
                   )}
                 </div>
               )}
-              {modal !== "broadcast" && <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3"><input type="checkbox" checked={form.isPromotional} onChange={(e) => setForm({ ...form, isPromotional: e.target.checked })} className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-1000" /><span><span className="block text-sm font-semibold text-slate-800">Promotional notification</span><span className="mt-0.5 block text-xs text-slate-500">Use for offers, campaigns, and marketing messages.</span></span></label>}
-              {modal === "broadcast" && <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-800">Customers' promotional preferences should be respected by the backend. Check the response for processed, skipped, and failed counts.</div>}
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3">
+                <input
+                  type="checkbox"
+                  checked={form.isPromotional}
+                  onChange={(e) => setForm((current) => ({ ...current, isPromotional: e.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-100"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Promotional notification</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Mark this as marketing content so customer notification preferences can be applied.
+                  </span>
+                </span>
+              </label>
+              {modal === "broadcast" && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                  This notification will be sent to eligible customers. The backend should respect each customer's promotional preferences and return processed, skipped, and failed counts.
+                </div>
+              )}
               <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end">
                 <button type="button" onClick={closeModal} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
                 <button type="submit" disabled={saving || uploadingImage} className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">{saving && <LoaderCircle size={16} className="animate-spin" />}{uploadingImage ? "Uploading image…" : saving ? "Saving…" : modal === "edit" ? "Save changes" : modal === "broadcast" ? "Send promotion" : modal === "create" ? "Create notification" : "Send notification"}</button>
