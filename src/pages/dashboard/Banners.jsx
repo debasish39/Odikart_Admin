@@ -15,12 +15,14 @@ import {
   deleteBanner,
 } from "../../services/bannerApi";
 import { getAdminProducts } from "../../services/productApi";
+import { getCategoryTree } from "../../services/categoryApi";
 
 const INITIAL_FORM = {
   title: "",
   subtitle: "",
   buttonText: "",
   placement: "home_main",
+  categoryId: "",
   redirectType: "none",
   redirectId: "",
   redirectUrl: "",
@@ -100,6 +102,29 @@ const getProductPrice = (product) => {
   return prices.length ? Math.min(...prices) : null;
 };
 
+const getCategoryId = (category) =>
+  typeof category === "string" ? category : category?._id || category?.id || "";
+
+const getCategoryName = (category) =>
+  category?.name || category?.title || category?.categoryName || category?.label || "Unnamed category";
+
+const flattenCategories = (items = []) => {
+  if (!Array.isArray(items)) return [];
+
+  return items.flatMap((category) => {
+    if (!category || typeof category !== "object") return [];
+
+    const children =
+      category.children ||
+      category.subCategories ||
+      category.subcategories ||
+      category.categories ||
+      [];
+
+    return [category, ...flattenCategories(children)];
+  });
+};
+
 export default function Banners() {
   const [banners, setBanners] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +145,8 @@ export default function Banners() {
   const [productsLoading, setProductsLoading] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [selectedProducts, setSelectedProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
 
   const loadBanners = async (quiet = false) => {
     try {
@@ -164,6 +191,26 @@ export default function Banners() {
     }
   };
 
+  const loadCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await getCategoryTree();
+      const tree =
+        response?.categories ||
+        response?.data?.categories ||
+        response?.tree ||
+        response?.data?.tree ||
+        response?.data ||
+        response;
+      setCategories(flattenCategories(Array.isArray(tree) ? tree : []));
+    } catch (error) {
+      console.error("Load categories error:", error);
+      toast.error(error.response?.data?.message || "Couldn't load categories");
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
   useEffect(() => { loadBanners(); }, []);
 
   useEffect(() => {
@@ -171,6 +218,12 @@ export default function Banners() {
     const timer = setTimeout(() => loadProducts(productSearch.trim()), 350);
     return () => clearTimeout(timer);
   }, [modalOpen, productSearch]);
+
+  useEffect(() => {
+    if (modalOpen && categories.length === 0) {
+      loadCategories();
+    }
+  }, [modalOpen]);
 
   const stats = useMemo(() => ({
     total: banners.length,
@@ -227,8 +280,11 @@ export default function Banners() {
       subtitle: banner.subtitle || "",
       buttonText: banner.buttonText || "",
       placement: banner.placement || "home_main",
-      redirectType: banner.redirectType || "none",
-      redirectId: banner.redirectId || "",
+      categoryId: getCategoryId(banner.categoryId) || (banner.placement === "category" ? banner.redirectId || "" : ""),
+      redirectType: banner.placement === "category" ? "category" : banner.redirectType || "none",
+      redirectId: banner.placement === "category"
+        ? getCategoryId(banner.categoryId) || banner.redirectId || ""
+        : banner.redirectId || "",
       redirectUrl: banner.redirectUrl || "",
       startDate: toLocalDateTime(banner.startDate),
       endDate: toLocalDateTime(banner.endDate),
@@ -289,6 +345,9 @@ export default function Banners() {
   const submitBanner = async (event) => {
     event.preventDefault();
     if (!editing && !desktopFile) return toast.error("Please upload the main banner image");
+    if (form.placement === "category" && !form.categoryId) {
+      return toast.error("Please select a category");
+    }
     if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) {
       return toast.error("End date must be after start date");
     }
@@ -306,6 +365,13 @@ export default function Banners() {
           body.append(key, String(value));
         }
       });
+      if (form.placement === "category") {
+        body.set("categoryId", form.categoryId);
+        body.set("redirectType", "category");
+        body.set("redirectId", form.categoryId);
+      } else {
+        body.set("categoryId", "");
+      }
       if (desktopFile) body.append("image", desktopFile);
       if (mobileFile) body.append("mobileImage", mobileFile);
       body.append(
@@ -479,8 +545,72 @@ export default function Banners() {
                     <InputField label="Campaign title" required><input required maxLength={100} value={form.title} onChange={(e) => setField("title", e.target.value)} placeholder="e.g. Diwali Mega Sale" className="control" /></InputField>
                     <InputField label="Button label"><input maxLength={30} value={form.buttonText} onChange={(e) => setField("buttonText", e.target.value)} placeholder="Shop now" className="control" /></InputField>
                     <div className="md:col-span-2"><InputField label="Subtitle"><textarea rows={2} maxLength={180} value={form.subtitle} onChange={(e) => setField("subtitle", e.target.value)} placeholder="Add a short supporting message..." className="control resize-y" /></InputField></div>
-                    <InputField label="Store placement" required><select value={form.placement} onChange={(e) => setField("placement", e.target.value)} className="control">{PLACEMENTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></InputField>
-                    <InputField label="Display priority"><input type="number" min="0" value={form.priority} onChange={(e) => setField("priority", e.target.value)} className="control" /><span className="mt-1 block text-[11px] text-slate-400">Higher numbers are shown first.</span></InputField>
+                    <InputField label="Store placement" required>
+                      <select
+                        value={form.placement}
+                        onChange={(e) => {
+                          const nextPlacement = e.target.value;
+                          setForm((current) => ({
+                            ...current,
+                            placement: nextPlacement,
+                            ...(nextPlacement === "category"
+                              ? {
+                                  redirectType: "category",
+                                  redirectId: current.categoryId || current.redirectId || "",
+                                }
+                              : { categoryId: "" }),
+                          }));
+                        }}
+                        className="control"
+                      >
+                        {PLACEMENTS.map((item) => (
+                          <option key={item.value} value={item.value}>{item.label}</option>
+                        ))}
+                      </select>
+                    </InputField>
+                    <InputField label="Display priority">
+                      <input type="number" min="0" value={form.priority} onChange={(e) => setField("priority", e.target.value)} className="control" />
+                      <span className="mt-1 block text-[11px] text-slate-400">Higher numbers are shown first.</span>
+                    </InputField>
+                    {form.placement === "category" && (
+                      <div className="md:col-span-2">
+                        <InputField label="Select category" required>
+                          <select
+                            value={form.categoryId}
+                            disabled={categoriesLoading}
+                            required
+                            onChange={(e) => {
+                              const categoryId = e.target.value;
+                              setForm((current) => ({
+                                ...current,
+                                categoryId,
+                                redirectType: "category",
+                                redirectId: categoryId,
+                              }));
+                            }}
+                            className="control"
+                          >
+                            <option value="">
+                              {categoriesLoading ? "Loading categories..." : "Choose a category"}
+                            </option>
+                            {categories.map((category) => {
+                              const id = getCategoryId(category);
+                              return id ? (
+                                <option key={id} value={id}>{getCategoryName(category)}</option>
+                              ) : null;
+                            })}
+                          </select>
+                          <span className="mt-1 block text-[11px] text-slate-400">
+                            This banner will be associated with the selected category.
+                          </span>
+                          {!categoriesLoading && categories.length === 0 && (
+                            <span className="mt-1 block text-[11px] text-rose-500">
+                              No categories were returned. Check the category tree API response.
+                            </span>
+                          )}
+                        </InputField>
+                      </div>
+                    )}
                   </div>
                 </FormSection>
 
@@ -589,11 +719,29 @@ export default function Banners() {
                 </FormSection>
 
                 <FormSection number="04" title="Click destination" description="Choose where customers should go after tapping this banner.">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <InputField label="Destination type"><select value={form.redirectType} onChange={(e) => setField("redirectType", e.target.value)} className="control">{REDIRECT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></InputField>
-                    {["category", "product", "collection"].includes(form.redirectType) && <InputField label="Destination ID"><input value={form.redirectId} onChange={(e) => setField("redirectId", e.target.value)} placeholder="Paste category / product ID" className="control" /></InputField>}
-                    {form.redirectType === "url" && <InputField label="Destination URL"><input type="url" value={form.redirectUrl} onChange={(e) => setField("redirectUrl", e.target.value)} placeholder="https://example.com" className="control" /></InputField>}
-                  </div>
+                  {form.placement === "category" ? (
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-800">
+                      This banner opens the category selected above: <strong>{categories.find((item) => getCategoryId(item) === form.categoryId) ? getCategoryName(categories.find((item) => getCategoryId(item) === form.categoryId)) : "Select a category in Campaign details"}</strong>.
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <InputField label="Destination type">
+                        <select value={form.redirectType} onChange={(e) => setField("redirectType", e.target.value)} className="control">
+                          {REDIRECT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                        </select>
+                      </InputField>
+                      {["category", "product", "collection"].includes(form.redirectType) && (
+                        <InputField label="Destination ID">
+                          <input value={form.redirectId} onChange={(e) => setField("redirectId", e.target.value)} placeholder="Paste category / product ID" className="control" />
+                        </InputField>
+                      )}
+                      {form.redirectType === "url" && (
+                        <InputField label="Destination URL">
+                          <input type="url" value={form.redirectUrl} onChange={(e) => setField("redirectUrl", e.target.value)} placeholder="https://example.com" className="control" />
+                        </InputField>
+                      )}
+                    </div>
+                  )}
                 </FormSection>
 
                 <FormSection number="05" title="Schedule & visibility" description="Leave dates empty if this banner should not have a time limit.">
